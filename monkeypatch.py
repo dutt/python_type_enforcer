@@ -5,15 +5,6 @@ from bytecode import Bytecode, Instr, Label, ConcreteBytecode
 
 import storage
 
-def mockstorage(arg):
-    if arg == 0:
-        return "str"
-    if arg == 1:
-        return "bool"
-    if arg == "return":
-        return "int"
-    raise ValueError(f"Unknown mock {idx=}")
-
 def get_verify_block(varidx, varname, vartype, block_type):
     print(f"generating block for {varidx=} {varname=} {vartype=}")
     label_builtins = Label()

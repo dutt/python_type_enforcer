@@ -9,9 +9,9 @@ def f(val: str) -> int:
         print("in builtins")
     assert isinstance(val, t0), f"argument 'val' is not of type {t0}"
     retr = int(val) + 15
-    #if "int" in globals():
-    #    rt = globals()["int"]
-    #else:
-    #    rt = __builtins__["int"]
-    #assert isinstance(retr, rt), rt
+    if "int" in globals():
+        rt = globals()["int"]
+    else:
+        rt = __builtins__["int"]
+    assert isinstance(retr, rt), f"return 'retr' is not of type {rt}"
     return retr
