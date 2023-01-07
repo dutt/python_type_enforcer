@@ -4,8 +4,9 @@ from pathlib import Path
 
 import storage
 
-rootdir="/home/mikael/workspace/python_type_enforcer"
-ignore_dirs=["/home/mikael/workspace/python_type_enforcer/venv"]
+currdir = Path(__file__).resolve().parent
+rootdir=str(currdir)
+ignore_dirs=[str(currdir / "venv")]
 
 def import_helper(name, globals=None, locals=None, fromlist=(), level=0):
     def should_parse(path):
