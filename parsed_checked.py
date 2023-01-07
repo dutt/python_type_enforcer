@@ -7,7 +7,7 @@ def f(val: str) -> int:
     else:
         t0 = __builtins__["str"]
         print("in builtins")
-    assert isinstance(val, t0), val
+    assert isinstance(val, t0), f"argument 'val' is not of type {t0}"
     retr = int(val) + 15
     #if "int" in globals():
     #    rt = globals()["int"]

@@ -66,85 +66,83 @@ def mockstorage(arg):
         return "int"
 
 from types import CodeType
-def get_verify_block(varname, vartype):
-    pass
+import bytecode
+from bytecode import Bytecode, Instr, Label, ConcreteBytecode
 
-def patch_func(func, new_body):
-    current = func.__code__
-    print(current.co_argcount)
-
-    SETUP_FINALLY = dis.opmap["SETUP_FINALLY"].to_bytes(2, byteorder="little")
-    LOAD_GLOBAL = dis.opmap["LOAD_GLOBAL"].to_bytes(2, byteorder="little")
-    CALL_FUNCTION = dis.opmap["CALL_FUNCTION"].to_bytes(2, byteorder="little")
-    LOAD_CONST = dis.opmap["LOAD_CONST"].to_bytes(2, byteorder="little")
-    BINARY_SUBSCR = dis.opmap["BINARY_SUBSCR"].to_bytes(2, byteorder="little")
-    #          2 LOAD_GLOBAL              0 (globals)
-    #          4 CALL_FUNCTION            0
-    #          6 LOAD_CONST               1 ('C')
-    #          8 BINARY_SUBSCR
-
-    #for attr in dir(func.__code__):
-    #     if attr.startswith('co_'):
-    #         print("\t%s = %s" % (attr, func.__code__.__getattribute__(attr)))
-    import bytecode
-    from bytecode import Bytecode, Instr, Label, ConcreteBytecode
-
-    label_t0builtins = Label()
-    label_t0isinstance = Label()
-    label_t0end = Label()
-    extra_num = current.co_argcount + 1
-    old_code = Bytecode.from_code(current)
-    old_code.argnames.append("val")
-
-    varname = "t0"
-    vartype = "str"
-    check_var_block = Bytecode([
+def get_verify_block(varidx, varname, vartype):
+    print(f"generating block for {varidx=} {varname=} {vartype=}")
+    label_builtins = Label()
+    label_isinstance = Label()
+    label_end = Label()
+    tmpvarname = f"t{varidx}"
+    return [
             Instr("LOAD_CONST", vartype),
             Instr("LOAD_GLOBAL", "globals"),
             Instr("CALL_FUNCTION", 0),
             Instr("CONTAINS_OP", 0),
-            Instr("POP_JUMP_IF_FALSE", label_t0builtins),
+            Instr("POP_JUMP_IF_FALSE", label_builtins),
 
             Instr("LOAD_GLOBAL", "globals"),
             Instr("CALL_FUNCTION", 0),
             Instr("LOAD_CONST", vartype),
             Instr("BINARY_SUBSCR"),
-            Instr("STORE_FAST", varname),
+            Instr("STORE_FAST", tmpvarname),
 
             Instr("LOAD_GLOBAL", "print"),
             Instr("LOAD_CONST", 'in globals'),
             Instr("CALL_FUNCTION", 1),
             Instr("POP_TOP"),
 
-            Instr("JUMP_FORWARD", label_t0isinstance),
+            Instr("JUMP_FORWARD", label_isinstance),
 
-            label_t0builtins,
+            label_builtins,
 
             Instr("LOAD_GLOBAL", "__builtins__"),
             Instr("LOAD_CONST", vartype),
             Instr("BINARY_SUBSCR"),
-            Instr("STORE_FAST", varname),
+            Instr("STORE_FAST", tmpvarname),
 
             Instr("LOAD_GLOBAL", "print"),
             Instr("LOAD_CONST", 'in builtins'),
             Instr("CALL_FUNCTION", 1),
             Instr("POP_TOP"),
 
-            label_t0isinstance,
+            label_isinstance,
 
             Instr("LOAD_GLOBAL", "isinstance"),
-            Instr("LOAD_FAST", "val"),
             Instr("LOAD_FAST", varname),
+            Instr("LOAD_FAST", tmpvarname),
             Instr("CALL_FUNCTION", 2),
-            Instr("POP_JUMP_IF_TRUE", label_t0end),
+            Instr("POP_JUMP_IF_TRUE", label_end),
             Instr("LOAD_ASSERTION_ERROR"),
-            Instr("LOAD_FAST", "val"),
+            Instr("LOAD_CONST", f"argument '{varname}' is not of type "),
+            Instr("LOAD_FAST", tmpvarname),
+            Instr("FORMAT_VALUE", 0),
+            Instr("BUILD_STRING", 2),
+
             Instr("CALL_FUNCTION", 1),
             Instr("RAISE_VARARGS", 1),
 
-            label_t0end,
-            #Instr(""),
-        ] + old_code)
+            label_end,
+        ]
+
+def patch_func(func, new_body):
+    current = func.__code__
+    print(current.co_argcount)
+
+    #for attr in dir(func.__code__):
+    #     if attr.startswith('co_'):
+    #         print("\t%s = %s" % (attr, func.__code__.__getattribute__(attr)))
+
+    extra_num = current.co_argcount + 1
+    old_code = Bytecode.from_code(current)
+    #old_code.argnames.append("val")
+
+    blocks = []
+    for idx, arg in enumerate(old_code.argnames):
+        blocks.extend(get_verify_block(idx, arg, "str"))
+
+    check_var_block = Bytecode([*blocks, *old_code])
     #check_var_block.argnames.append("foo")
     check_var_block.legalize()
     check_var_block._copy_attr_from(old_code)
@@ -185,10 +183,10 @@ def main():
     #pc.f("f")
     #dis.dis(p.f)
     patch_func(p.f, p.f.__code__.co_code)
-    dis.dis(p.f)
-    dis.show_code(p.f)
+    dis.dis(pc.f)
+    dis.show_code(pc.f)
 
-    p.f("4")
+    p.f("4", False)
 
 
 if __name__ == '__main__':
