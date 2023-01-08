@@ -22,3 +22,4 @@ Possibly some value in a CI pipeline.
 - Python version checking. I've tried this on python 3.10.6 on ubuntu 22.04. At least add version verification.
 - Recurse, add monkeypatch call on each function call not already wrapped
 - Cleaner configuration for import_helper paths
+- Tests

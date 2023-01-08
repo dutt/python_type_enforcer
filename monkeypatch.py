@@ -5,7 +5,7 @@ from bytecode import Bytecode, Instr, Label, ConcreteBytecode
 
 import storage
 
-def get_print_block(text):
+def _get_print_block(text):
     return [
         Instr("LOAD_GLOBAL", "print"),
         Instr("LOAD_CONST", text),
@@ -13,7 +13,7 @@ def get_print_block(text):
         Instr("POP_TOP"),
     ]
 
-def get_verify_block(varidx, varname, vartype, block_type):
+def _get_verify_block(varidx, varname, vartype, block_type):
     label_builtins = Label()
     label_isinstance = Label()
     label_end = Label()
@@ -32,7 +32,7 @@ def get_verify_block(varidx, varname, vartype, block_type):
             Instr("BINARY_SUBSCR"),
             Instr("STORE_FAST", tmpvarname),
 
-            #*get_print_block(f"{varidx=} {varname=} {vartype=} {tmpvarname=} in globals"),
+            #*_get_print_block(f"{varidx=} {varname=} {vartype=} {tmpvarname=} in globals"),
 
             Instr("JUMP_FORWARD", label_isinstance),
 
@@ -43,7 +43,7 @@ def get_verify_block(varidx, varname, vartype, block_type):
             Instr("BINARY_SUBSCR"),
             Instr("STORE_FAST", tmpvarname),
 
-            #*get_print_block(f"{varidx=} {varname=} {vartype=} {tmpvarname=} in builtins"),
+            #*_get_print_block(f"{varidx=} {varname=} {vartype=} {tmpvarname=} in builtins"),
 
             label_isinstance,
 
@@ -64,19 +64,19 @@ def get_verify_block(varidx, varname, vartype, block_type):
             label_end,
         ]
 
-def get_start_tmp_var_block(varname):
+def _get_start_tmp_var_block(varname):
     print(f"start tmp_var_block {varname=}")
     return [
         Instr("STORE_FAST", varname),
     ]
 
-def get_end_tmp_var_block(varname):
+def _get_end_tmp_var_block(varname):
     print(f"end tmp_var_block {varname=}")
     return [
         Instr("LOAD_FAST", varname)
     ]
 
-def get_stored(current):
+def _get_stored(current):
     path = current.co_filename
     if path not in storage.STORAGE:
         raise ValueError(f"No storage for {path=}")
@@ -85,13 +85,28 @@ def get_stored(current):
         if f["name"] == current.co_name and f["lineno"] == current.co_firstlineno:
             return f
 
+def _func_is_patched(old_code, argblocks):
+    def verify_name(instr):
+        return not isinstance(instr, Label)
+    def verify_arg(instr):
+        return not instr.has_jump()
+
+    for idx, instr in enumerate(argblocks):
+        if type(old_code[idx]) != type(instr):
+            return False
+        if verify_name(instr):
+            if old_code[idx].name != instr.name:
+                return False
+            if verify_arg(instr) and old_code[idx].arg != instr.arg:
+                return False
+    return True
+
 def patch_func(func):
     current = func.__code__
-    # TODO check if already patched
+    name = f"{current.co_filename}:{current.co_firstlineno}:{current.co_name}"
 
-    print(f"Patching {current.co_filename}:{current.co_firstlineno}")
     old_code = Bytecode.from_code(current)
-    funcdata = get_stored(current)
+    funcdata = _get_stored(current)
     assert funcdata
 
     argblocks = []
@@ -99,10 +114,14 @@ def patch_func(func):
         vartype = [a for a in funcdata["args"] if a["name"] == arg]
         assert len(vartype) == 1, vartype
         vartype = vartype[0]["type"]
-        argblocks.extend(get_verify_block(idx, arg, vartype, block_type="argument"))
+        argblocks.extend(_get_verify_block(idx, arg, vartype, block_type="argument"))
 
+    if _func_is_patched(old_code, argblocks):
+        print(f"Function already patched, {name}")
+        return
+
+    print(f"Patching {name}")
     newlocals = len(argblocks)
-
     old_code_with_return_asserts = []
     returns = 0
     for idx, instr in enumerate(old_code):
@@ -110,27 +129,22 @@ def patch_func(func):
             continue
         if instr.name == "RETURN_VALUE":
             vartype = funcdata["return_type"]
-
-            # if it's already a variable just assert type
-            #varname = old_code[idx-1].arg
-            #print(f"got return at {idx}, {varname=}, {return_size=}")
-            #verify_block = get_verify_block(returns, varname, vartype, block_type="return")
-
-            # otherwise, make a temp variable
-            newlocals += 1
-            #return_size = 1
-            #while (isinstance(old_code[idx-return_size], Label) or
-            #       old_code[idx-return_size].lineno == instr.lineno) and return_size <= idx:
-            #    return_size += 1
-            varname = f"retr_{idx}_{current.co_name}"
-            #print(f"got return at {idx}, {varname=}, {return_size=}")
-            print(f"got return at {idx}, {varname=}")
-            start_tmp_var_block = get_start_tmp_var_block(varname)
-            old_code_with_return_asserts.extend(start_tmp_var_block)
-            verify_block = get_verify_block(returns, varname, vartype, block_type="return")
-            old_code_with_return_asserts.extend(verify_block)
-            end_tmp_var_block = get_end_tmp_var_block(varname)
-            old_code_with_return_asserts.extend(end_tmp_var_block)
+            if hasattr(old_code[idx-1], "name") and old_code[idx-1].name == "LOAD_FAST":
+                # if it's already a variable just assert type
+                varname = old_code[idx-1].arg
+                print(f"got return of variable at {idx}, {varname=}")
+                verify_block = _get_verify_block(returns, varname, vartype, block_type="return")
+            else:
+                # otherwise, make a temp variable
+                newlocals += 1
+                varname = f"retr_{idx}_{current.co_name}"
+                print(f"generating tmp var for return at {idx}, {varname=}")
+                start_tmp_var_block = _get_start_tmp_var_block(varname)
+                old_code_with_return_asserts.extend(start_tmp_var_block)
+                verify_block = _get_verify_block(returns, varname, vartype, block_type="return")
+                old_code_with_return_asserts.extend(verify_block)
+                end_tmp_var_block = _get_end_tmp_var_block(varname)
+                old_code_with_return_asserts.extend(end_tmp_var_block)
 
             returns += 1
         old_code_with_return_asserts.append(instr)
