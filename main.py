@@ -11,7 +11,7 @@ def main():
     dis.dis(p.f)
     dis.show_code(p.f)
 
-    p.f("4", False)
+    p.f("4")
 
 
 if __name__ == '__main__':

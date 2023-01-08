@@ -5,12 +5,20 @@ from bytecode import Bytecode, Instr, Label, ConcreteBytecode
 
 import storage
 
+def get_print_block(text):
+    return [
+        Instr("LOAD_GLOBAL", "print"),
+        Instr("LOAD_CONST", text),
+        Instr("CALL_FUNCTION", 1),
+        Instr("POP_TOP"),
+    ]
+
 def get_verify_block(varidx, varname, vartype, block_type):
-    print(f"generating block for {varidx=} {varname=} {vartype=}")
     label_builtins = Label()
     label_isinstance = Label()
     label_end = Label()
     tmpvarname = f"{block_type}{varname}{varidx}"
+    print(f"generating {block_type} block for {varidx=} {varname=} {vartype=} {tmpvarname=}")
     return [
             Instr("LOAD_CONST", vartype),
             Instr("LOAD_GLOBAL", "globals"),
@@ -24,10 +32,7 @@ def get_verify_block(varidx, varname, vartype, block_type):
             Instr("BINARY_SUBSCR"),
             Instr("STORE_FAST", tmpvarname),
 
-            Instr("LOAD_GLOBAL", "print"),
-            Instr("LOAD_CONST", 'in globals'),
-            Instr("CALL_FUNCTION", 1),
-            Instr("POP_TOP"),
+            #*get_print_block(f"{varidx=} {varname=} {vartype=} {tmpvarname=} in globals"),
 
             Instr("JUMP_FORWARD", label_isinstance),
 
@@ -38,10 +43,7 @@ def get_verify_block(varidx, varname, vartype, block_type):
             Instr("BINARY_SUBSCR"),
             Instr("STORE_FAST", tmpvarname),
 
-            Instr("LOAD_GLOBAL", "print"),
-            Instr("LOAD_CONST", 'in builtins'),
-            Instr("CALL_FUNCTION", 1),
-            Instr("POP_TOP"),
+            #*get_print_block(f"{varidx=} {varname=} {vartype=} {tmpvarname=} in builtins"),
 
             label_isinstance,
 
@@ -62,6 +64,18 @@ def get_verify_block(varidx, varname, vartype, block_type):
             label_end,
         ]
 
+def get_start_tmp_var_block(varname):
+    print(f"start tmp_var_block {varname=}")
+    return [
+        Instr("STORE_FAST", varname),
+    ]
+
+def get_end_tmp_var_block(varname):
+    print(f"end tmp_var_block {varname=}")
+    return [
+        Instr("LOAD_FAST", varname)
+    ]
+
 def get_stored(current):
     path = current.co_filename
     if path not in storage.STORAGE:
@@ -73,6 +87,8 @@ def get_stored(current):
 
 def patch_func(func):
     current = func.__code__
+    # TODO check if already patched
+
     print(f"Patching {current.co_filename}:{current.co_firstlineno}")
     old_code = Bytecode.from_code(current)
     funcdata = get_stored(current)
@@ -85,19 +101,43 @@ def patch_func(func):
         vartype = vartype[0]["type"]
         argblocks.extend(get_verify_block(idx, arg, vartype, block_type="argument"))
 
+    newlocals = len(argblocks)
+
     old_code_with_return_asserts = []
     returns = 0
     for idx, instr in enumerate(old_code):
+        if isinstance(instr, Label):
+            continue
         if instr.name == "RETURN_VALUE":
-            # TODO make more flexible, if it's 'return str(retr)'
-            varname = old_code[idx-1].arg
             vartype = funcdata["return_type"]
+
+            # if it's already a variable just assert type
+            #varname = old_code[idx-1].arg
+            #print(f"got return at {idx}, {varname=}, {return_size=}")
+            #verify_block = get_verify_block(returns, varname, vartype, block_type="return")
+
+            # otherwise, make a temp variable
+            newlocals += 1
+            #return_size = 1
+            #while (isinstance(old_code[idx-return_size], Label) or
+            #       old_code[idx-return_size].lineno == instr.lineno) and return_size <= idx:
+            #    return_size += 1
+            varname = f"retr_{idx}_{current.co_name}"
+            #print(f"got return at {idx}, {varname=}, {return_size=}")
             print(f"got return at {idx}, {varname=}")
+            start_tmp_var_block = get_start_tmp_var_block(varname)
+            old_code_with_return_asserts.extend(start_tmp_var_block)
             verify_block = get_verify_block(returns, varname, vartype, block_type="return")
             old_code_with_return_asserts.extend(verify_block)
+            end_tmp_var_block = get_end_tmp_var_block(varname)
+            old_code_with_return_asserts.extend(end_tmp_var_block)
+
+            returns += 1
         old_code_with_return_asserts.append(instr)
 
-    check_var_block = Bytecode([*argblocks, *old_code_with_return_asserts])
+    blocks = [*argblocks, *old_code_with_return_asserts]
+    #print("\n".join([str(b) for b in blocks]))
+    check_var_block = Bytecode(blocks)
     check_var_block.legalize()
     check_var_block._copy_attr_from(old_code)
     concrete = check_var_block.to_concrete_bytecode()
@@ -106,7 +146,7 @@ def patch_func(func):
                              current.co_argcount,
                              current.co_posonlyargcount,
                              current.co_kwonlyargcount,
-                             current.co_nlocals + current.co_argcount,
+                             current.co_nlocals + newlocals,
                              concrete.compute_stacksize(),
                              current.co_flags,
                              concrete.to_code().co_code,
