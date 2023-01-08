@@ -9,10 +9,8 @@ import parsed as p
 def main():
     print("patching")
     monkeypatch.patch_func(p.f)
-    print("second patch")
-    monkeypatch.patch_func(p.f)
-    print("patching f2")
-    monkeypatch.patch_func(p.f2)
+    #print("second patch")
+    #monkeypatch.patch_func(p.f)
     #print("output")
     #dis.dis(p.f)
     #dis.show_code(p.f)

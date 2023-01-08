@@ -101,6 +101,24 @@ def _func_is_patched(old_code, argblocks):
                 return False
     return True
 
+def _generate_return(current, old_code, idx, funcdata, returns):
+    vartype = funcdata["return_type"]
+    if hasattr(old_code[idx-1], "name") and old_code[idx-1].name == "LOAD_FAST":
+        # if it's already a variable just assert type
+        varname = old_code[idx-1].arg
+        print(f"got return of variable at {idx}, {varname=}")
+        verify_block = _get_verify_block(returns, varname, vartype, block_type="return")
+        return 0, verify_block
+    else:
+        # otherwise, make a temp variable
+        varname = f"retr_{idx}_{current.co_name}"
+        print(f"generating tmp var for return at {idx}, {varname=}")
+        start_tmp_var_block = _get_start_tmp_var_block(varname)
+        verify_block = _get_verify_block(returns, varname, vartype, block_type="return")
+        end_tmp_var_block = _get_end_tmp_var_block(varname)
+        blocks = [*start_tmp_var_block, *verify_block, *end_tmp_var_block]
+        return 1, blocks
+
 def patch_func(func):
     current = func.__code__
     name = f"{current.co_filename}:{current.co_firstlineno}:{current.co_name}"
@@ -128,33 +146,23 @@ def patch_func(func):
         if isinstance(instr, Label):
             continue
         if instr.name == "RETURN_VALUE":
-            vartype = funcdata["return_type"]
-            if hasattr(old_code[idx-1], "name") and old_code[idx-1].name == "LOAD_FAST":
-                # if it's already a variable just assert type
-                varname = old_code[idx-1].arg
-                print(f"got return of variable at {idx}, {varname=}")
-                verify_block = _get_verify_block(returns, varname, vartype, block_type="return")
-            else:
-                # otherwise, make a temp variable
-                newlocals += 1
-                varname = f"retr_{idx}_{current.co_name}"
-                print(f"generating tmp var for return at {idx}, {varname=}")
-                start_tmp_var_block = _get_start_tmp_var_block(varname)
-                old_code_with_return_asserts.extend(start_tmp_var_block)
-                verify_block = _get_verify_block(returns, varname, vartype, block_type="return")
-                old_code_with_return_asserts.extend(verify_block)
-                end_tmp_var_block = _get_end_tmp_var_block(varname)
-                old_code_with_return_asserts.extend(end_tmp_var_block)
-
+            newlocals_diff, blocks = _generate_return(current, old_code, idx, funcdata, returns)
+            newlocals += newlocals_diff
             returns += 1
+            old_code_with_return_asserts.extend(blocks)
+        elif instr.name == "CALL_FUNCTION":
+            # find functions
+            funcs = []
+            pos_diff = 0
+
         old_code_with_return_asserts.append(instr)
 
     blocks = [*argblocks, *old_code_with_return_asserts]
     #print("\n".join([str(b) for b in blocks]))
-    check_var_block = Bytecode(blocks)
-    check_var_block.legalize()
-    check_var_block._copy_attr_from(old_code)
-    concrete = check_var_block.to_concrete_bytecode()
+    checked = Bytecode(blocks)
+    checked.legalize()
+    checked._copy_attr_from(old_code)
+    concrete = checked.to_concrete_bytecode()
     # TODO create code type object according to sys.version_info
     func.__code__ = CodeType(
                              current.co_argcount,

@@ -11,6 +11,8 @@ Then another part monkey-patcher that modifies a functions bytecode to insert ru
 
 For a visual explanation it transforms the file `parsed.py` into the file `parsed_checked.py`, without you having to rewrite the code yourself.
 
+It detects already patched functions, so no double-patching.
+
 ## Oh dear gods below why?
 
 I've had this idea bouncing around for a year and finally got fed up with it. It was easier than expected :) But then I've never had the python interpreter segfault as much as when building this. Weird how it doesn't like malformed bytecode, who'd have thought?
