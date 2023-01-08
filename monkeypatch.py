@@ -1,9 +1,10 @@
 from types import CodeType
+import inspect
 
 import bytecode
 from bytecode import Bytecode, Instr, Label, ConcreteBytecode
 
-import storage
+#import storage
 
 def _get_print_block(text):
     return [
@@ -76,15 +77,6 @@ def _get_end_tmp_var_block(varname):
         Instr("LOAD_FAST", varname)
     ]
 
-def _get_stored(current):
-    path = current.co_filename
-    if path not in storage.STORAGE:
-        raise ValueError(f"No storage for {path=}")
-    functions = storage.STORAGE[path]
-    for f in functions:
-        if f["name"] == current.co_name and f["lineno"] == current.co_firstlineno:
-            return f
-
 def _func_is_patched(old_code, argblocks):
     def verify_name(instr):
         return not isinstance(instr, Label)
@@ -101,8 +93,8 @@ def _func_is_patched(old_code, argblocks):
                 return False
     return True
 
-def _generate_return(current, old_code, idx, funcdata, returns):
-    vartype = funcdata["return_type"]
+def _generate_return(current, old_code, idx, annotations, returns):
+    vartype = vartype = annotations["return"].__name__
     if hasattr(old_code[idx-1], "name") and old_code[idx-1].name == "LOAD_FAST":
         # if it's already a variable just assert type
         varname = old_code[idx-1].arg
@@ -124,14 +116,12 @@ def patch_func(func):
     name = f"{current.co_filename}:{current.co_firstlineno}:{current.co_name}"
 
     old_code = Bytecode.from_code(current)
-    funcdata = _get_stored(current)
-    assert funcdata
+    annotations = inspect.get_annotations(func)
+    assert annotations
 
     argblocks = []
     for idx, arg in enumerate(old_code.argnames):
-        vartype = [a for a in funcdata["args"] if a["name"] == arg]
-        assert len(vartype) == 1, vartype
-        vartype = vartype[0]["type"]
+        vartype = annotations[arg].__name__
         argblocks.extend(_get_verify_block(idx, arg, vartype, block_type="argument"))
 
     if _func_is_patched(old_code, argblocks):
@@ -146,7 +136,7 @@ def patch_func(func):
         if isinstance(instr, Label):
             continue
         if instr.name == "RETURN_VALUE":
-            newlocals_diff, blocks = _generate_return(current, old_code, idx, funcdata, returns)
+            newlocals_diff, blocks = _generate_return(current, old_code, idx, annotations, returns)
             newlocals += newlocals_diff
             returns += 1
             old_code_with_return_asserts.extend(blocks)
